@@ -1,5 +1,5 @@
 import React from 'react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Loader from './Loader'
 import Results from './Results'
 import { analyseTranscript, analyseSopDocument } from './Analyse'
@@ -13,7 +13,7 @@ const getInputType = (file) => {
   const name = file.name.toLowerCase()
   if (name.endsWith('.vtt') || name.endsWith('.txt')) return 'transcript'
   if (name.endsWith('.docx') || name.endsWith('.pdf'))  return 'sop'
-  return 'transcript' // fallback
+  return 'transcript'
 }
 
 const INPUT_TYPE_META = {
@@ -34,7 +34,7 @@ const INPUT_TYPE_META = {
 }
 
 // ─────────────────────────────────────────
-//  Intent chip (what do you want from it?)
+//  Intent chip
 // ─────────────────────────────────────────
 
 const INTENTS = [
@@ -60,7 +60,7 @@ const INTENTS = [
 
 const IntentSelector = ({ selected, onChange }) => (
   <div className="space-y-2 mt-5">
-    <p className="text-xs font-semibold text-[#00528d] uppercase tracking-wide mb-2">
+    <p className="text-xs font-semibold text-[#6d28d9] uppercase tracking-wide mb-2">
       What would you like to do with this SOP?
     </p>
     {INTENTS.map(intent => {
@@ -77,13 +77,13 @@ const IntentSelector = ({ selected, onChange }) => (
           }
           className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all duration-150 cursor-pointer
             ${active
-              ? 'border-[#00528d] bg-[#e5edf3]'
-              : 'border-[#b8dcf8] bg-white hover:bg-[#d9efff] hover:border-[#00528d]'
+              ? 'border-[#6d28d9] bg-[#f3e8ff]'
+              : 'border-[#e9d5ff] bg-white hover:bg-[#faf5ff] hover:border-[#c4b5fd]'
             }`}
         >
           <span
             className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0 transition-all
-              ${active ? 'bg-[#00528d] text-white' : 'bg-[#d9efff] text-[#00528d]'}`}
+              ${active ? 'bg-[#6d28d9] text-white' : 'bg-[#f3e8ff] text-[#7c3aed]'}`}
           >
             {intent.icon}
           </span>
@@ -109,20 +109,64 @@ const IntentSelector = ({ selected, onChange }) => (
 )
 
 // ─────────────────────────────────────────
+//  Safe error messages
+// ─────────────────────────────────────────
+const SAFE_ERRORS = {
+  sop: 'We could not process your SOP document. Please check the file is a valid .docx or .pdf and try again.',
+  transcript: 'We could not analyse the transcript. Please check the file is a valid .vtt or .txt and try again.',
+}
+
+const USER_FACING_ERRORS = [
+  'Could not read the PDF file',
+  'Could not read the Word document',
+  'Could not extract any text',
+  'Please use the SOP document upload path',
+  'Failed to parse AI response',
+  'Please provide a file',
+  'No valid intents',
+]
+
+const getSafeErrorMessage = (err, type = 'sop') => {
+  const msg = err?.message || ''
+  if (USER_FACING_ERRORS.some(safe => msg.startsWith(safe))) return msg
+  return SAFE_ERRORS[type] || 'Something went wrong. Please try again.'
+}
+
+// ─────────────────────────────────────────
 //  Main component
 // ─────────────────────────────────────────
 
-const UploadTranscript = () => {
+const UploadTranscript = ({ onShowResults }) => {
   const [uploadedFile, setUploadedFile] = useState(null)
   const [isDragging, setIsDragging]     = useState(false)
   const [isAnalysing, setIsAnalysing]   = useState(false)
   const [showResults, setShowResults]   = useState(false)
+
+  useEffect(() => {
+    onShowResults?.(isAnalysing || showResults)
+  }, [isAnalysing, showResults, onShowResults])
   const [error, setError]               = useState('')
   const [resultsData, setResultsData]   = useState(null)
   const [apiPromise, setApiPromise]     = useState(null)
 
+  const [pendingTabs, setPendingTabs]   = useState(new Set())
+
+  const resultsDataRef = React.useRef(null)
+
+  const firstReadyTabRef = React.useRef(null)
+
+  const setResultsWithRef = (data) => {
+    resultsDataRef.current = data
+    setResultsData(data)
+  }
+
+  const mergeChunk = (payload) => {
+    const next = { ...(resultsDataRef.current || {}), ...payload }
+    setResultsWithRef(next)
+  }
+
   // SOP-specific state
-  const [inputType, setInputType]       = useState(null)      // 'transcript' | 'sop'
+  const [inputType, setInputType]       = useState(null)      
   const [selectedIntents, setSelectedIntents] = useState(['restructure', 'diagram', 'bottlenecks'])
 
   const handleFileChange = (file) => {
@@ -130,7 +174,6 @@ const UploadTranscript = () => {
     setUploadedFile(file)
     setError('')
     setInputType(getInputType(file))
-    // Default: all intents selected for SOP, none needed for transcript
     setSelectedIntents(['restructure', 'diagram', 'bottlenecks'])
   }
 
@@ -140,8 +183,6 @@ const UploadTranscript = () => {
       return
     }
 
-    // Derive route from file extension directly — don't rely solely on inputType
-    // state which may still be null if React hasn't flushed the setState yet
     const detectedType = inputType || getInputType(uploadedFile)
 
     if (detectedType === 'sop' && selectedIntents.length === 0) {
@@ -151,49 +192,96 @@ const UploadTranscript = () => {
 
     setError('')
     setIsAnalysing(true)
+    setResultsWithRef(null)
+    firstReadyTabRef.current = null
 
-    // Build the promise — errors are handled inside so the Loader
-    // always gets a resolved promise (it checks resultsData, not the value)
-    let promise
-
-    if (detectedType === 'sop') {
-      promise = analyseSopDocument(uploadedFile, selectedIntents)
-        .then(data => {
-          setResultsData(data)
-          return data
-        })
-        .catch(err => {
-          console.error('SOP analysis error:', err)
-          // Show the actual server message if available, fallback to generic
-          const msg = err?.message || 'Something went wrong while processing the SOP document'
-          setError(msg)
-          setIsAnalysing(false)
-          return null   // resolve to null so Loader doesn't hang
-        })
+    const expected = new Set()
+    if (detectedType === 'transcript') {
+      expected.add('sop'); expected.add('diagram'); expected.add('bottlenecks')
     } else {
-      promise = analyseTranscript(uploadedFile)
-        .then(data => {
-          setResultsData(data)
-          return data
+      if (selectedIntents.includes('restructure')) expected.add('sop')
+      if (selectedIntents.includes('diagram'))     expected.add('diagram')
+      if (selectedIntents.includes('bottlenecks')) expected.add('bottlenecks')
+    }
+    setPendingTabs(new Set(expected))
+
+    const handleEvent = (event, data) => {
+
+      const tabKey =
+        event === 'sop'         ? 'sop' :
+        event === 'diagram'     ? 'lucid' :
+        event === 'bottlenecks' ? 'bottlenecks' : null
+
+      if (tabKey && !resultsDataRef.current) {
+        firstReadyTabRef.current = tabKey
+        setShowResults(true)
+        setIsAnalysing(false)
+      }
+
+      if (event === 'sop') {
+        mergeChunk(data)
+        setPendingTabs(prev => {
+          const next = new Set(prev); next.delete('sop'); return next
         })
-        .catch(err => {
-          console.error('Transcript analysis error:', err)
-          const msg = err?.message || 'Something went wrong while analysing the transcript'
-          setError(msg)
+      } else if (event === 'diagram') {
+        mergeChunk(data)
+        setPendingTabs(prev => {
+          const next = new Set(prev); next.delete('diagram'); return next
+        })
+      } else if (event === 'bottlenecks') {
+        mergeChunk(data)
+        setPendingTabs(prev => {
+          const next = new Set(prev); next.delete('bottlenecks'); return next
+        })
+      } else if (event === 'diagram_flags') {
+        const current = resultsDataRef.current
+        if (current?.diagram?.nodes && data.flags) {
+          const patched = {
+            ...current,
+            diagram: {
+              ...current.diagram,
+              nodes: current.diagram.nodes.map(n => ({
+                ...n,
+                flag: data.flags[n.id] ?? n.flag ?? false,
+              })),
+            },
+          }
+          setResultsWithRef(patched)
+        }
+      } else if (event === 'error') {
+        console.error('Stream error:', data)
+        if (data.part) {
+          setPendingTabs(prev => {
+            const next = new Set(prev); next.delete(data.part); return next
+          })
+        } else {
+          setError(getSafeErrorMessage(new Error(data.error || ''), detectedType))
           setIsAnalysing(false)
-          return null
-        })
+        }
+      }
     }
 
-    setApiPromise(promise)
+    // Build the streaming promise
+    const streamPromise = (detectedType === 'sop'
+      ? analyseSopDocument(uploadedFile, selectedIntents, handleEvent)
+      : analyseTranscript(uploadedFile, handleEvent)
+    )
+      .catch(err => {
+        console.error(`${detectedType} analysis error:`, err)
+        if (!resultsDataRef.current) {
+          const safeMsg = getSafeErrorMessage(err, detectedType)
+          setError(safeMsg)
+          setIsAnalysing(false)
+        }
+        setPendingTabs(new Set())
+      })
+
+    setApiPromise(streamPromise)
   }
 
   const handleLoaderComplete = () => {
     setIsAnalysing(false)
-    // Only navigate to results if we actually have data —
-    // if the API call failed, resultsData is still null and
-    // the error message is already shown on the upload screen
-    if (resultsData) {
+    if (resultsDataRef.current) {
       setShowResults(true)
     }
   }
@@ -213,10 +301,15 @@ const UploadTranscript = () => {
       data={resultsData}
       inputType={inputType}
       selectedIntents={selectedIntents}
+      pendingTabs={pendingTabs}
+      initialTab={firstReadyTabRef.current}
       onBack={() => {
         setShowResults(false)
         setUploadedFile(null)
         setInputType(null)
+        setResultsWithRef(null)
+        setPendingTabs(new Set())
+        firstReadyTabRef.current = null
       }}
     />
   )
@@ -230,7 +323,7 @@ const UploadTranscript = () => {
 
   const isSop        = inputType === 'sop'
   const accentColor  = isSop ? '#6d28d9' : '#00528d'
-  const accentBg     = isSop ? '#d9efff' : '#d9efff'   // page bg stays the same
+  const accentBg     = isSop ? '#d9efff' : '#d9efff'
   const pillActive   = isSop ? 'bg-[#6d28d9]' : 'bg-[#00528d]'
 
   return (
