@@ -7,14 +7,17 @@ import ReactFlow, {
   reconnectEdge,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
+import dagre from 'dagre'
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
+import Footer from './Footer'
 
-const LANE_HEIGHT = 180
+// Layout constants
+const LANE_HEIGHT = 200
 const LANE_HEADER_WIDTH = 160
-const NODE_WIDTH = 180
-const NODE_GAP = 60
-const NODE_START_X = LANE_HEADER_WIDTH + 40
+const NODE_WIDTH = 200
+const NODE_GAP = 80
+const NODE_START_X = LANE_HEADER_WIDTH + 50
 
 // Helper: strip function props before cloning state (for storage & history)
 const stripFunctions = (obj) =>
@@ -127,13 +130,11 @@ const ProcessNode = ({ data, selected, id }) => (
           />
         </div>
       )}
-      {data.flag && <span className="inline-block text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full mt-1">
-        <InlineEditableLabel
-          value={data.bottleneckLabel || "⚠ Bottleneck"}
-          onChange={v => data.onChangeBottleneck?.(id, v)}
-          placeholder="Flag reason"
-          className="text-[10px] text-red-600 bg-red-100 px-2 py-0.5 rounded-full"/>
-        </span>}
+      {data.flag && (
+        <span className="inline-block text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full mt-1 font-semibold">
+          ⚠ Bottleneck
+        </span>
+      )}
     </div>
   </>
 )
@@ -154,7 +155,7 @@ const DecisionNode = ({ data, selected, id }) => (
         className={`absolute inset-[15%] flex items-center justify-center text-center px-1 ${selected ? 'drop-shadow-md' : ''}`}
         style={{
           background: data.flag ? '#fef2f2' : '#faf5ff',
-          border: `2px solid ${selected ? '#7c3aed' : data.flag ? '#f87171' : '#d8b4fe'}`,
+          border: `${data.flag ? '3px' : '2px'} solid ${data.flag ? '#dc2626' : selected ? '#7c3aed' : '#d8b4fe'}`,
           transform: 'rotate(45deg)',
         }}
       >
@@ -180,8 +181,12 @@ const StartEndNode = ({ data, selected, id }) => (
       handleStyle={{ background: data.kind === 'start' ? '#16a34a' : '#ea580c', width: 8, height: 8 }}
     />
     <div
-      className={`w-full h-full px-4 py-1 rounded-full border-2 text-center shadow-sm flex items-center justify-center
-        ${data.kind === 'start' ? 'bg-green-50 border-green-400' : 'bg-orange-50 border-orange-400'}
+      className={`w-full h-full px-4 py-1 rounded-full text-center shadow-sm flex items-center justify-center
+        ${data.flag
+          ? 'bg-red-50 border-[3px] border-red-600'
+          : data.kind === 'start'
+            ? 'bg-green-50 border-2 border-green-400'
+            : 'bg-orange-50 border-2 border-orange-400'}
         ${selected ? 'shadow-md' : ''}`}
     >
       <FourSidedHandles color={data.kind === 'start' ? '#16a34a' : '#ea580c'} />
@@ -219,11 +224,11 @@ const LaneNode = ({ data, selected, id }) => {
 
       <div
         className="w-full h-full rounded-l-lg relative"
-        style={{ background: data.color, border: '1px solid #d9e8f5' }}
+        style={{ background: data.color, border: '1px solid #d9e8f5', pointerEvents: 'none' }}
       >
         <div
           className="absolute left-0 top-0 bottom-0 flex items-center justify-center border-r border-[#d9e8f5] bg-white/70"
-          style={{ width: LANE_HEADER_WIDTH }}
+          style={{ width: LANE_HEADER_WIDTH, pointerEvents: 'all' }}
         >
           <div className="px-2 text-center w-full">
             <InlineEditableLabel
@@ -248,11 +253,6 @@ const nodeTypes = {
 
 // ═══════════════════════════════════════
 //  EDITABLE + BENDABLE EDGE
-//
-//  Bend works by storing (bendX, bendY) offsets from the natural
-//  midpoint of the arrow. When selected, a circular handle appears
-//  at the control point. Drag it to reshape the curve.
-//  Double-click the handle to straighten back to 0,0.
 // ═══════════════════════════════════════
 const EditableEdge = ({
   id, sourceX, sourceY, targetX, targetY,
@@ -261,38 +261,33 @@ const EditableEdge = ({
 }) => {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(data?.label || '')
-  const dragging = useRef(false)
+  const dragging = useRef(null) // 'cp1' | 'cp2' | null
 
   useEffect(() => { setDraft(data?.label || '') }, [data?.label])
 
-  const offset = data?.offset ?? 0
-  const bendX = data?.bendX ?? 0
-  const bendY = data?.bendY ?? 0
-  const hasBend = bendX !== 0 || bendY !== 0
-
-  // Natural midpoint
   const midX = (sourceX + targetX) / 2
   const midY = (sourceY + targetY) / 2
 
-  // Control point = natural midpoint + user drag
-  const cpX = midX + bendX
-  const cpY = midY + bendY
+  // Two control points, each offset from their natural third positions
+  const cp1X = (sourceX + midX) / 2 + (data?.cp1x ?? 0)
+  const cp1Y = (sourceY + midY) / 2 + (data?.cp1y ?? 0)
+  const cp2X = (midX + targetX) / 2 + (data?.cp2x ?? 0)
+  const cp2Y = (midY + targetY) / 2 + (data?.cp2y ?? 0)
+
+  const hasBend = (data?.cp1x || data?.cp1y || data?.cp2x || data?.cp2y)
 
   let edgePath, labelX, labelY
 
   if (hasBend) {
-    // Quadratic bezier through the control point
-    edgePath = `M ${sourceX} ${sourceY} Q ${cpX} ${cpY} ${targetX} ${targetY}`
-    // Bezier midpoint at t=0.5
-    labelX = 0.25 * sourceX + 0.5 * cpX + 0.25 * targetX
-    labelY = 0.25 * sourceY + 0.5 * cpY + 0.25 * targetY
+    edgePath = `M ${sourceX} ${sourceY} C ${cp1X} ${cp1Y} ${cp2X} ${cp2Y} ${targetX} ${targetY}`
+    labelX = 0.125*sourceX + 0.375*cp1X + 0.375*cp2X + 0.125*targetX
+    labelY = 0.125*sourceY + 0.375*cp1Y + 0.375*cp2Y + 0.125*targetY
   } else {
-    // Original smooth step
     ;[edgePath, labelX, labelY] = getSmoothStepPath({
       sourceX, sourceY, sourcePosition,
       targetX, targetY, targetPosition,
       borderRadius: 8,
-      offset: 20 + offset * 15,
+      offset: 20 + (data?.offset ?? 0) * 15,
     })
   }
 
@@ -304,31 +299,37 @@ const EditableEdge = ({
   const strokeColor = style.stroke || '#00528d'
   const strokeWidth = selected ? 3.5 : 2
 
-  // ── Drag the bend handle ──
-  const onHandleMouseDown = (e) => {
+  const getZoom = () => {
+    const vp = document.querySelector('.react-flow__viewport')
+    if (!vp) return 1
+    return new DOMMatrix(window.getComputedStyle(vp).transform).a || 1
+  }
+
+  const onHandleMouseDown = (e, which) => {
     e.stopPropagation()
     e.preventDefault()
-    dragging.current = true
+    dragging.current = which
 
     const startMouseX = e.clientX
     const startMouseY = e.clientY
-    const startBendX = bendX
-    const startBendY = bendY
-
-    const getZoom = () => {
-      const vp = document.querySelector('.react-flow__viewport')
-      if (!vp) return 1
-      const m = new DOMMatrix(window.getComputedStyle(vp).transform)
-      return m.a || 1
-    }
+    const startCp1x = data?.cp1x ?? 0
+    const startCp1y = data?.cp1y ?? 0
+    const startCp2x = data?.cp2x ?? 0
+    const startCp2y = data?.cp2y ?? 0
 
     const onMouseMove = (me) => {
       if (!dragging.current) return
       const z = getZoom()
-      data?.onChangeBend?.(id, startBendX + (me.clientX - startMouseX) / z, startBendY + (me.clientY - startMouseY) / z)
+      const dx = (me.clientX - startMouseX) / z
+      const dy = (me.clientY - startMouseY) / z
+      if (dragging.current === 'cp1') {
+        data?.onChangeBend?.(id, startCp1x + dx, startCp1y + dy, startCp2x, startCp2y)
+      } else {
+        data?.onChangeBend?.(id, startCp1x, startCp1y, startCp2x + dx, startCp2y + dy)
+      }
     }
     const onMouseUp = () => {
-      dragging.current = false
+      dragging.current = null
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
     }
@@ -338,90 +339,76 @@ const EditableEdge = ({
 
   const onHandleDoubleClick = (e) => {
     e.stopPropagation()
-    data?.onChangeBend?.(id, 0, 0)
+    data?.onChangeBend?.(id, 0, 0, 0, 0)
   }
 
   return (
     <>
-      {/* Wide invisible hit area */}
-      <path
-        d={edgePath}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={22}
-        style={{ cursor: 'pointer' }}
-        className="react-flow__edge-interaction"
-      />
+      <path d={edgePath} fill="none" stroke="transparent" strokeWidth={22}
+        style={{ cursor: 'pointer' }} className="react-flow__edge-interaction" />
       {selected && (
-        <path
-          d={edgePath}
-          fill="none"
-          stroke="#0ea5e9"
-          strokeWidth={8}
-          strokeOpacity={0.25}
-          strokeLinecap="round"
-        />
+        <path d={edgePath} fill="none" stroke="#0ea5e9"
+          strokeWidth={8} strokeOpacity={0.25} strokeLinecap="round" />
       )}
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
-        style={{
-          stroke: strokeColor,
-          strokeWidth,
-          strokeDasharray: animated ? '6 4' : undefined,
-          animation: animated ? 'dashdraw 0.5s linear infinite' : undefined,
-        }}
-      />
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{
+        stroke: strokeColor, strokeWidth,
+        strokeDasharray: animated ? '6 4' : undefined,
+        animation: animated ? 'dashdraw 0.5s linear infinite' : undefined,
+      }} />
 
       <EdgeLabelRenderer>
-        {/* Bend handle — only when selected */}
-        {selected && (
-          <div
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${cpX}px,${cpY}px)`,
-              pointerEvents: 'all',
-              zIndex: 2000,
-            }}
-            className="nodrag nopan"
-          >
+        {/* Control point handles — only when selected */}
+        {selected && [
+          { which: 'cp1', cx: cp1X, cy: cp1Y, anchorX: sourceX, anchorY: sourceY },
+          { which: 'cp2', cx: cp2X, cy: cp2Y, anchorX: targetX, anchorY: targetY },
+        ].map(({ which, cx, cy, anchorX, anchorY }) => (
+          <div key={which} style={{ position: 'absolute', pointerEvents: 'none',
+            transform: `translate(0,0)`, zIndex: 1999 }}>
+            {/* Dotted guide line from anchor to control point */}
+            <svg style={{ position: 'absolute', left: 0, top: 0,
+              width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+              <line
+                x1={anchorX} y1={anchorY} x2={cx} y2={cy}
+                stroke={strokeColor} strokeWidth={1}
+                strokeDasharray="4 3" opacity={0.5}
+              />
+            </svg>
+            {/* Draggable handle */}
             <div
-              onMouseDown={onHandleMouseDown}
-              onDoubleClick={onHandleDoubleClick}
-              title="Drag to bend • Double-click to straighten"
               style={{
-                width: 16,
-                height: 16,
-                borderRadius: '50%',
-                background: '#ffffff',
-                border: `2.5px solid ${strokeColor}`,
-                cursor: 'grab',
-                boxShadow: '0 1px 6px rgba(0,0,0,0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                position: 'absolute',
+                transform: `translate(-50%, -50%) translate(${cx}px,${cy}px)`,
+                pointerEvents: 'all', zIndex: 2000,
               }}
+              className="nodrag nopan"
             >
-              <div style={{ width: 5, height: 5, borderRadius: '50%', background: strokeColor }} />
+              <div
+                onMouseDown={e => onHandleMouseDown(e, which)}
+                onDoubleClick={onHandleDoubleClick}
+                title="Drag to bend • Double-click to straighten all"
+                style={{
+                  width: 14, height: 14, borderRadius: '50%',
+                  background: '#ffffff',
+                  border: `2.5px solid ${strokeColor}`,
+                  cursor: 'grab',
+                  boxShadow: '0 1px 6px rgba(0,0,0,0.25)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <div style={{ width: 4, height: 4, borderRadius: '50%', background: strokeColor }} />
+              </div>
             </div>
           </div>
-        )}
+        ))}
 
         {/* Edge label */}
-        <div
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
-            zIndex: 1001,
-          }}
-          className="nodrag nopan"
-        >
+        <div style={{
+          position: 'absolute',
+          transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+          pointerEvents: 'all', zIndex: 1001,
+        }} className="nodrag nopan">
           {editing ? (
-            <input
-              autoFocus
-              value={draft}
+            <input autoFocus value={draft}
               onChange={e => setDraft(e.target.value)}
               onBlur={commit}
               onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
@@ -444,9 +431,7 @@ const EditableEdge = ({
           )}
         </div>
       </EdgeLabelRenderer>
-      <style>{`
-        @keyframes dashdraw { to { stroke-dashoffset: -10; } }
-      `}</style>
+      <style>{`@keyframes dashdraw { to { stroke-dashoffset: -10; } }`}</style>
     </>
   )
 }
@@ -456,33 +441,92 @@ const edgeTypes = { editable: EditableEdge }
 // ═══════════════════════════════════════
 //  BUILD FLOW FROM BACKEND DIAGRAM
 // ═══════════════════════════════════════
+
+const pickHandles = (sourceNode, targetNode, isLoopbackEdge) => {
+  if (sourceNode.id === targetNode.id) {
+    return { sourceHandle: 's-bottom', targetHandle: 't-bottom' }
+  }
+
+  const dLane = targetNode._laneIdx - sourceNode._laneIdx
+  const dCol  = targetNode._col - sourceNode._col
+
+  if (isLoopbackEdge) {
+    return { sourceHandle: 's-top', targetHandle: 't-top' }
+  }
+
+  if (dLane > 0) {
+    return Math.abs(dCol) <= 1
+      ? { sourceHandle: 's-bottom', targetHandle: 't-top' }
+      : { sourceHandle: 's-right',  targetHandle: 't-left' }
+  }
+
+  if (dLane < 0) {
+    return Math.abs(dCol) <= 1
+      ? { sourceHandle: 's-top', targetHandle: 't-bottom' }
+      : { sourceHandle: 's-right', targetHandle: 't-left' }
+  }
+
+  if (dCol < 0) {
+    return { sourceHandle: 's-top', targetHandle: 't-top' }
+  }
+
+  return { sourceHandle: 's-right', targetHandle: 't-left' }
+}
+
+const TARGET_SPREAD = {
+  't-left':   ['t-left',   't-top',    't-bottom', 't-right'],
+  't-right':  ['t-right',  't-top',    't-bottom', 't-left'],
+  't-top':    ['t-top',    't-left',   't-right',  't-bottom'],
+  't-bottom': ['t-bottom', 't-left',   't-right',  't-top'],
+}
+const SOURCE_SPREAD = {
+  's-left':   ['s-left',   's-top',    's-bottom', 's-right'],
+  's-right':  ['s-right',  's-top',    's-bottom', 's-left'],
+  's-top':    ['s-top',    's-left',   's-right',  's-bottom'],
+  's-bottom': ['s-bottom', 's-left',   's-right',  's-top'],
+}
+
 const buildFlowFromDiagram = (diagram) => {
   if (!diagram || !diagram.lanes || !diagram.nodes) return { nodes: [], edges: [] }
 
-  const colors = ['#e8f4ff', '#e8f9f0', '#fff4e8', '#f3e8ff', '#fef3c7', '#fce7f3']
-  const maxOrder = Math.max(...diagram.nodes.map(n => n.order || 1), 1)
-  const laneWidth = NODE_START_X + maxOrder * (NODE_WIDTH + NODE_GAP) + 80
-
-  const laneNodes = diagram.lanes.map((lane, i) => ({
-    id: lane.id,
-    type: 'lane',
-    position: { x: 0, y: i * LANE_HEIGHT },
-    data: { label: lane.label, color: lane.color || colors[i % colors.length] },
-    style: { width: laneWidth, height: LANE_HEIGHT, zIndex: 0 },
-    zIndex: 0,
-    draggable: false,  // locked until explicitly selected
-    selectable: true,
-  }))
-
+  const colors = ['#eaf3fb', '#eaf6ef', '#fdf2e6', '#f1ebfa', '#fef6e1', '#fbecf2', '#eef3fb', '#eaf6ef']
   const laneIndexById = Object.fromEntries(diagram.lanes.map((l, i) => [l.id, i]))
 
-  const stepNodes = diagram.nodes.map(n => {
-    const laneIdx = laneIndexById[n.laneId] ?? 0
-    const x = NODE_START_X + ((n.order || 1) - 1) * (NODE_WIDTH + NODE_GAP)
+ 
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({
+    rankdir: 'LR',
+    nodesep: 30,    
+    ranksep: 90,    
+    edgesep: 15,
+    marginx: 20,
+    marginy: 20,
+  })
+  g.setDefaultEdgeLabel(() => ({}))
+
+  diagram.nodes.forEach(n => {
     const isDecision = n.type === 'decision'
-    const y = laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2 - (isDecision ? 60 : 30)
-    const width = isDecision ? 120 : NODE_WIDTH
-    const height = isDecision ? 120 : 70
+    g.setNode(n.id, {
+      width:  isDecision ? 130 : NODE_WIDTH,
+      height: isDecision ? 130 : 80,
+    })
+  })
+  ;(diagram.edges || []).forEach(e => {
+    if (e.type !== 'loopback') g.setEdge(e.source, e.target)
+  })
+  dagre.layout(g)
+
+  const nodeMetaById = {}
+  const stepNodes = diagram.nodes.map(n => {
+    const dagreNode = g.node(n.id)
+    const laneIdx = laneIndexById[n.laneId] ?? 0
+    const isDecision = n.type === 'decision'
+    const width  = isDecision ? 130 : NODE_WIDTH
+    const height = isDecision ? 130 : 80
+    const x = NODE_START_X + dagreNode.x - width / 2
+    const y = laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2 - height / 2
+
+    nodeMetaById[n.id] = { id: n.id, _laneIdx: laneIdx, _xCenter: dagreNode.x }
 
     return {
       id: n.id,
@@ -499,21 +543,86 @@ const buildFlowFromDiagram = (diagram) => {
     }
   })
 
-  const pairCounts = {}
-  const edges = (diagram.edges || []).map((e) => {
-    const pairKey = [e.source, e.target].sort().join('|')
-    pairCounts[pairKey] = pairCounts[pairKey] || 0
-    const offset = pairCounts[pairKey]++
-    const color = e.type === 'loopback' ? '#f59e0b' : '#00528d'
+  const nodesByLane = {}
+  Object.values(nodeMetaById).forEach(m => {
+    nodesByLane[m._laneIdx] = nodesByLane[m._laneIdx] || []
+    nodesByLane[m._laneIdx].push(m)
+  })
+  Object.values(nodesByLane).forEach(arr => {
+    arr.sort((a, b) => a._xCenter - b._xCenter)
+    arr.forEach((m, i) => { m._col = i })
+  })
+
+  const maxX = Math.max(
+    ...stepNodes.map(n => n.position.x + (n.style?.width || NODE_WIDTH))
+  )
+  const laneWidth = Math.max(maxX + 60, NODE_START_X + 400)
+
+  const laneNodes = diagram.lanes.map((lane, i) => ({
+    id: lane.id,
+    type: 'lane',
+    position: { x: 0, y: i * LANE_HEIGHT },
+    data: { label: lane.label, color: lane.color || colors[i % colors.length] },
+    style: { width: laneWidth, height: LANE_HEIGHT, zIndex: 0 },
+    zIndex: 0,
+    draggable: false,
+    selectable: true,
+  }))
+
+  const preliminary = (diagram.edges || []).map(e => {
+    const srcMeta = nodeMetaById[e.source]
+    const tgtMeta = nodeMetaById[e.target]
+    if (!srcMeta || !tgtMeta) {
+      return { e, sourceHandle: 's-right', targetHandle: 't-left', isLoopback: false }
+    }
+    const isLoopback = e.type === 'loopback'
+    const { sourceHandle, targetHandle } = pickHandles(srcMeta, tgtMeta, isLoopback)
+    return { e, sourceHandle, targetHandle, isLoopback, srcMeta, tgtMeta }
+  })
+
+  const incomingCount = {}
+  const outgoingCount = {}
+  const sourceEdgeCount = {}
+  const targetEdgeCount = {}
+
+  const edges = preliminary.map(({ e, sourceHandle, targetHandle, isLoopback, srcMeta, tgtMeta }) => {
+    const tKey = `${e.target}|${targetHandle}`
+    const tIdx = incomingCount[tKey] = (incomingCount[tKey] ?? -1) + 1
+    const targetSides = TARGET_SPREAD[targetHandle] || [targetHandle]
+    const finalTargetHandle = targetSides[tIdx % targetSides.length]
+
+    // Spread outgoing
+    const sKey = `${e.source}|${sourceHandle}`
+    const sIdx = outgoingCount[sKey] = (outgoingCount[sKey] ?? -1) + 1
+    const sourceSides = SOURCE_SPREAD[sourceHandle] || [sourceHandle]
+    const finalSourceHandle = sourceSides[sIdx % sourceSides.length]
+
+    // Stagger
+    sourceEdgeCount[e.source] = (sourceEdgeCount[e.source] ?? -1) + 1
+    targetEdgeCount[e.target] = (targetEdgeCount[e.target] ?? -1) + 1
+    const offset = sourceEdgeCount[e.source] + targetEdgeCount[e.target]
+
+    // Loopback arc
+    let cp1x = 0, cp1y = 0, cp2x = 0, cp2y = 0
+    if (isLoopback && srcMeta && tgtMeta) {
+      const colSpan = Math.abs(srcMeta._col - tgtMeta._col)
+      const archHeight = -(90 + colSpan * 45)
+      cp1y = archHeight
+      cp2y = archHeight
+    }
+
+    const color = isLoopback ? '#d97706' : '#0c447c'
     return {
       id: e.id,
       source: e.source,
       target: e.target,
+      sourceHandle: finalSourceHandle,
+      targetHandle: finalTargetHandle,
       type: 'editable',
-      data: { label: e.label || '', offset, bendX: 0, bendY: 0 },
-      animated: e.type === 'loopback',
+      data: { label: e.label || '', offset, cp1x, cp1y, cp2x, cp2y },
+      animated: isLoopback,
       markerEnd: { type: MarkerType.ArrowClosed, color },
-      style: { stroke: color, strokeWidth: 2 },
+      style: { stroke: color, strokeWidth: 1.8 },
       zIndex: 5,
     }
   })
@@ -524,7 +633,7 @@ const buildFlowFromDiagram = (diagram) => {
 // ═══════════════════════════════════════
 //  MAIN COMPONENT
 // ═══════════════════════════════════════
-const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialState = null }) => {
+const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialState = null, showJsonTools = false, showJsonExport = false }) => {
   const initial = useMemo(
     () => initialState || buildFlowFromDiagram(diagram),
     [initialState, diagram]
@@ -534,10 +643,12 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
   const [selectedNodeId, setSelectedNodeId] = useState(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState(null)
   const [exporting, setExporting] = useState(false)
+  const [pdfModalOpen, setPdfModalOpen] = useState(false)
+  const [pdfTitle, setPdfTitle] = useState('')
   const [, setHistoryTick] = useState(0)
   const flowRef = useRef(null)
   const edgeUpdateSuccessful = useRef(true)
-  const { fitView, getNodes, setViewport, getViewport } = useReactFlow()
+  const { fitView, getNodes, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
 
   // ── Undo / Redo ──
   const history = useRef([])
@@ -576,9 +687,11 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     setEdges(cur => cur.map(x => x.id === edgeId ? { ...x, data: { ...x.data, label: newLabel } } : x))
   }, [snapshot])
 
-  // Bend changer — no snapshot on every drag frame (too noisy); snapshot on mousedown instead
-  const edgeBendChanger = useCallback((edgeId, bx, by) => {
-    setEdges(cur => cur.map(x => x.id === edgeId ? { ...x, data: { ...x.data, bendX: bx, bendY: by } } : x))
+  const edgeBendChanger = useCallback((edgeId, cp1x, cp1y, cp2x, cp2y) => {
+    setEdges(cur => cur.map(x => x.id === edgeId
+      ? { ...x, data: { ...x.data, cp1x, cp1y, cp2x, cp2y } }
+      : x
+    ))
   }, [])
 
   const edgeClickHandler = useCallback((edgeId) => {
@@ -629,7 +742,6 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     setTimeout(() => { isApplyingHistory.current = false; bumpHistoryTick() }, 0)
   }, [nodes, edges, rewireCallbacks, bumpHistoryTick])
 
-  // Wire callbacks on mount — also lock all lanes (fixes fullscreen view)
   useEffect(() => {
     setNodes(prev => prev.map(n => ({
       ...n,
@@ -644,20 +756,21 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
         onEdgeClick: edgeClickHandler,
         onChangeBend: edgeBendChanger,
         onChangeBottleneck: bottleneckChanger,
-        bendX: e.data?.bendX ?? 0,
-        bendY: e.data?.bendY ?? 0,
+        cp1x: e.data?.cp1x ?? 0,
+        cp1y: e.data?.cp1y ?? 0,
+        cp2x: e.data?.cp2x ?? 0,
+        cp2y: e.data?.cp2y ?? 0,
       },
     })))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Persist to localStorage
   useEffect(() => {
+    if (showJsonTools) return
     try {
       const { nodes: cleanNodes, edges: cleanEdges } = cloneForHistory(nodes, edges)
       localStorage.setItem('diagram-state', JSON.stringify({ nodes: cleanNodes, edges: cleanEdges, sopTitle }))
     } catch {}
-  }, [nodes, edges, sopTitle])
+  }, [nodes, edges, sopTitle, showJsonTools])
 
   useEffect(() => {
     setTimeout(() => fitView({ padding: 0.2 }), 100)
@@ -675,8 +788,10 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
         data: {
           label: '',
           offset: 0,
-          bendX: 0,
-          bendY: 0,
+          cp1x: 0,
+          cp1y: 0,
+          cp2x: 0,
+          cp2y: 0,
           onChangeLabel: edgeLabelChanger,
           onEdgeClick: edgeClickHandler,
           onChangeBend: edgeBendChanger,
@@ -711,22 +826,23 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     () => edges.map(e => ({
       ...e,
       selected: e.id === selectedEdgeId,
-      // Always keep live callbacks on displayed edges
       data: { ...e.data, onChangeBend: edgeBendChanger },
     })),
     [edges, selectedEdgeId, edgeBendChanger]
   )
 
   const displayedNodes = useMemo(
-    () => nodes.map(n => ({ ...n, selected: n.id === selectedNodeId,data: {
+  () => nodes.map(n => ({
+    ...n,
+    data: {
       ...n.data,
       onChangeLabel: labelChanger,
       onChangeDescription: descChanger,
       onChangeBottleneck: bottleneckChanger,
-    }, 
+    },
   })),
-    [nodes, selectedNodeId, labelChanger, descChanger, bottleneckChanger]
-  )
+  [nodes, labelChanger, descChanger, bottleneckChanger]
+)
 
   // Helper: lock all lanes, optionally unlock one by id
   const setLaneDraggable = useCallback((unlockId = null) => {
@@ -735,12 +851,11 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     ))
   }, [])
 
-  const onNodeClick = useCallback((_, node) => {
-    setSelectedNodeId(node.id)
-    setSelectedEdgeId(null)
-    // Unlock only this lane for dragging; lock every other lane
-    setLaneDraggable(node.type === 'lane' ? node.id : null)
-  }, [setLaneDraggable])
+  const onNodeClick = useCallback((e, node) => {
+  setSelectedEdgeId(null)
+  setSelectedNodeId(node.type === 'lane' ? null : node.id)
+  setLaneDraggable(node.type === 'lane' ? node.id : null)
+}, [setLaneDraggable])
 
   const onEdgeClick = useCallback((_, edge) => {
     setSelectedEdgeId(edge.id)
@@ -776,35 +891,49 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (isTyping) return
-        if (selectedNodeId) {
+        const selectedNodes = getNodes().filter(n => n.selected)
+        if (selectedNodes.length > 0) {
           snapshot()
-          setNodes(nds => nds.filter(n => n.id !== selectedNodeId))
-          setEdges(eds => eds.filter(ed => ed.source !== selectedNodeId && ed.target !== selectedNodeId))
+          const ids = new Set(selectedNodes.map(n => n.id))
+          setNodes(nds => nds.filter(n => !ids.has(n.id)))
+          setEdges(eds => eds.filter(ed => !ids.has(ed.source) && !ids.has(ed.target)))
           setSelectedNodeId(null)
         } else if (selectedEdgeId) {
           snapshot()
           setEdges(eds => eds.filter(ed => ed.id !== selectedEdgeId))
           setSelectedEdgeId(null)
         }
-      }
+      }     
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedNodeId, selectedEdgeId, snapshot, undo, redo])
+  }, [selectedNodeId, selectedEdgeId, snapshot, undo, redo, getNodes])
 
   const addNode = (type = 'process') => {
     snapshot()
     const id = `node-${Date.now()}`
     const labels = { process: 'New step', decision: 'New decision?', start: 'Start', end: 'End' }
     const dims = type === 'decision'
-      ? { width: 120, height: 120 }
+      ? { width: 130, height: 130 }
       : type === 'start' || type === 'end'
-        ? { width: 120, height: 50 }
-        : { width: NODE_WIDTH, height: 70 }
+        ? { width: 140, height: 56 }
+        : { width: NODE_WIDTH, height: 80 }
+
+    // Get the visible center of the flow pane in screen coordinates
+    const flowWrapper = flowRef.current?.querySelector('.react-flow')
+    const rect = flowWrapper?.getBoundingClientRect()
+    const centerScreenX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2
+    const centerScreenY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2
+
+    // Let React Flow convert screen -> flow coordinates using its own tracked transform
+    const flowPos = screenToFlowPosition({ x: centerScreenX, y: centerScreenY })
 
     setNodes(nds => [...nds, {
       id, type,
-      position: { x: 300, y: 100 },
+      position: {
+        x: flowPos.x - dims.width / 2,
+        y: flowPos.y - dims.height / 2,
+      },
       data: {
         label: labels[type],
         description: type === 'process' ? '' : undefined,
@@ -818,10 +947,24 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     }])
   }
 
+  const toggleBottleneck = useCallback(() => {
+    if (!selectedNodeId) return
+    const node = nodes.find(n => n.id === selectedNodeId)
+    if (!node || node.type === 'lane') return
+    snapshot()
+    setNodes(cur => cur.map(n =>
+      n.id === selectedNodeId
+        ? { ...n, data: { ...n.data, flag: !n.data.flag } }
+        : n
+    ))
+  }, [selectedNodeId, nodes, snapshot])
+
+
+
   const addLane = () => {
     snapshot()
     const id = `lane-${Date.now()}`
-    const colors = ['#e8f4ff', '#e8f9f0', '#fff4e8', '#f3e8ff', '#fef3c7', '#fce7f3']
+    const colors = ['#eaf3fb', '#eaf6ef', '#fdf2e6', '#f1ebfa', '#fef6e1', '#fbecf2', '#eef3fb', '#eaf6ef']
     const laneNodes = nodes.filter(n => n.type === 'lane')
     const laneCount = laneNodes.length
     const laneWidth = Math.max(...laneNodes.map(n => n.style?.width || 800), 800)
@@ -845,7 +988,14 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     window.open(url, '_blank', 'noopener')
   }
 
-  const handleExportPDF = async () => {
+  const openPdfModal = () => {
+  setPdfTitle(sopTitle || 'Process Swimlane Diagram')
+  //setPdfSubtitle(`Generated ${new Date().toLocaleDateString()}`)
+  setPdfModalOpen(true)
+}
+
+const handleExportPDF = async () => {
+    setPdfModalOpen(false)
     setExporting(true)
     const originalViewport = getViewport()
 
@@ -905,7 +1055,7 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
 
       pdf.setFontSize(16)
       pdf.setTextColor(0, 82, 141)
-      pdf.text(sopTitle || 'Process Swimlane Diagram', 15, 15)
+      pdf.text(pdfTitle, 15, 15)
       pdf.setFontSize(9)
       pdf.setTextColor(120, 120, 120)
       pdf.text(`Generated ${new Date().toLocaleDateString()}`, 15, 21)
@@ -922,7 +1072,7 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
       const imgH = img.height * ratio
 
       pdf.addImage(dataUrl, 'PNG', (pageW - imgW) / 2, topOffset, imgW, imgH, undefined, 'FAST')
-      pdf.save(`${(sopTitle || 'process-diagram').replace(/\s+/g, '-').toLowerCase()}.pdf`)
+      pdf.save(`${(pdfTitle || 'process-diagram').replace(/\s+/g, '-').toLowerCase()}.pdf`)
     } catch (err) {
       console.error('PDF export failed:', err)
       alert('Could not export diagram to PDF. Please try again.')
@@ -930,6 +1080,249 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
     }
     setExporting(false)
   }
+
+  const fileInputRef = useRef(null)
+
+  const handleExportJSON = () => {
+    try {
+      const { nodes: cleanNodes, edges: cleanEdges } = cloneForHistory(nodes, edges)
+      const payload = {
+        version: 1,
+        type: 'swimlane-diagram',
+        sopTitle: sopTitle || 'Process Diagram',
+        exportedAt: new Date().toISOString(),
+        nodes: cleanNodes,
+        edges: cleanEdges,
+      }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(sopTitle || 'process-diagram').replace(/\s+/g, '-').toLowerCase()}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('JSON export failed:', err)
+      alert('Could not export diagram to JSON. Please try again.')
+    }
+  }
+
+  const handleExportLucidCSV = () => {
+    try {
+      const shapeNodes = nodes.filter(n => n.type !== 'lane')
+      const laneNodes  = nodes
+        .filter(n => n.type === 'lane')
+        .sort((a, b) => (a.position?.y ?? 0) - (b.position?.y ?? 0))
+
+      if (shapeNodes.length === 0) {
+        alert('Nothing to export.')
+        return
+      }
+
+      const SHAPE_LIBRARY = 'Flowchart Shapes'
+      const lucidShape = (type) => {
+        switch (type) {
+          case 'decision': return 'Decision'
+          case 'start':
+          case 'end':      return 'Terminator'
+          default:         return 'Process'
+        }
+      }
+
+      const esc = (val) => {
+        const s = String(val ?? '')
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+      }
+
+      const laneColById = {}
+      laneNodes.forEach((l, i) => { laneColById[l.id] = i + 1 })
+      const laneCount = Math.max(laneNodes.length, 1)
+
+      let nextId = 1
+      const PAGE_ID    = nextId++   // 1
+      const SWIMLANE_ID = nextId++  // 2
+      const shapeIdById = {}        // reactflow node id -> csv id
+      shapeNodes.forEach(n => { shapeIdById[n.id] = nextId++ })
+
+      const laneColOf = (node) => {
+        if (laneNodes.length === 0) return 1
+        const ny = node.position?.y ?? 0
+        let best = null
+        let bestDist = Infinity
+        for (const lane of laneNodes) {
+          const top = lane.position?.y ?? 0
+          const h = lane.style?.height ?? LANE_HEIGHT
+          if (ny >= top && ny < top + h) return laneColById[lane.id]
+          const dist = Math.abs(ny - (top + h / 2))
+          if (dist < bestDist) { bestDist = dist; best = laneColById[lane.id] }
+        }
+        return best || 1
+      }
+
+      const textAreaCount = Math.max(laneCount, 1)
+      const header = [
+        'Id', 'Name', 'Shape Library', 'Page ID', 'Contained By',
+        'Line Source', 'Line Destination', 'Source Arrow', 'Destination Arrow',
+        ...Array.from({ length: textAreaCount }, (_, i) => `Text Area ${i + 1}`),
+      ]
+      const FIXED_COLS = 9                       
+      const blankTextAreas = Array(textAreaCount).fill('')
+
+      const makeRow = (fixed, textAreas) => {
+        const tas = blankTextAreas.slice()
+        textAreas.forEach((v, i) => { if (i < tas.length) tas[i] = v })
+        return [...fixed, ...tas]
+      }
+
+      const rows = []
+
+      rows.push(makeRow([PAGE_ID, 'Page', '', '', '', '', '', '', ''], []))
+
+      const laneLabels = laneNodes.length
+        ? laneNodes.map(l => l.data?.label || 'Lane')
+        : ['Lane']
+      rows.push(makeRow(
+        [SWIMLANE_ID, 'Swim Lane', SHAPE_LIBRARY, PAGE_ID, '', '', '', '', ''],
+        laneLabels,
+      ))
+
+      shapeNodes.forEach(n => {
+        const col = laneColOf(n)
+        rows.push(makeRow(
+          [
+            shapeIdById[n.id], lucidShape(n.type), SHAPE_LIBRARY, PAGE_ID,
+            `${SWIMLANE_ID}:${col}`,
+            '', '', '', '',
+          ],
+          [n.data?.label || ''],
+        ))
+      })
+
+      // 4) Line rows — reference shapes by Id; label in Text Area 1.
+      edges.forEach(e => {
+        const src = shapeIdById[e.source]
+        const dst = shapeIdById[e.target]
+        if (src == null || dst == null) return // skip dangling edges
+        rows.push(makeRow(
+          [nextId++, 'Line', SHAPE_LIBRARY, PAGE_ID, '', src, dst, 'None', 'Arrow'],
+          [e.data?.label || ''],
+        ))
+      })
+
+      const csv = [header, ...rows]
+        .map(row => row.map(esc).join(','))
+        .join('\n')
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(sopTitle || 'process-diagram').replace(/\s+/g, '-').toLowerCase()}-lucid.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Lucid CSV export failed:', err)
+      alert('Could not export for Lucidchart. Please try again.')
+    }
+  }
+
+  const handleImportMultipleJSON = (files) => {
+        if (!files || files.length === 0) return
+
+        const readFile = (file) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => {
+              try {
+                const parsed = JSON.parse(reader.result)
+                if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges))
+                  throw new Error('shape')
+                resolve(parsed)
+              } catch {
+                reject(new Error(`Invalid JSON in file: ${file.name}`))
+              }
+            }
+            reader.onerror = () => reject(new Error(`Could not read: ${file.name}`))
+            reader.readAsText(file)
+          })
+
+        Promise.all(files.map(readFile))
+          .then((diagrams) => {
+            snapshot() // single undo point for the whole import
+
+            // Start below the lowest existing node
+            const existingBottom = nodes.reduce((max, n) => {
+              const bottom = (n.position?.y ?? 0) + (n.style?.height ?? LANE_HEIGHT)
+              return Math.max(max, bottom)
+            }, 0)
+
+            const VERTICAL_GAP = 60
+            let cursor = existingBottom > 0 ? existingBottom + VERTICAL_GAP : 0
+
+            let mergedNodes = [...nodes]
+            let mergedEdges = [...edges]
+
+            diagrams.forEach((parsed, fileIndex) => {
+              // Find the top-most Y in this diagram so we can normalise it to 0
+              const minY = Math.min(...parsed.nodes.map(n => n.position?.y ?? 0))
+              const yOffset = cursor - minY
+
+              // Give every node/edge a unique ID suffix to avoid collisions
+              const suffix = `_imp${Date.now()}_${fileIndex}`
+              const idMap = {}   // old id → new id
+
+              const remappedNodes = parsed.nodes.map(n => {
+                const newId = n.id + suffix
+                idMap[n.id] = newId
+                return {
+                  ...n,
+                  id: newId,
+                  position: { x: n.position.x, y: (n.position?.y ?? 0) + yOffset },
+                  // lanes are not draggable by default
+                  draggable: n.type === 'lane' ? false : n.draggable,
+                }
+              })
+
+              const remappedEdges = parsed.edges.map(e => ({
+                ...e,
+                id: e.id + suffix,
+                source: idMap[e.source] ?? e.source + suffix,
+                target: idMap[e.target] ?? e.target + suffix,
+                data: {
+                  ...e.data,
+                  cp1x: e.data?.cp1x ?? 0,
+                  cp1y: e.data?.cp1y ?? 0,
+                  cp2x: e.data?.cp2x ?? 0,
+                  cp2y: e.data?.cp2y ?? 0,
+                },
+              }))
+
+              // Advance cursor past this diagram's height
+              const diagramBottom = Math.max(
+                ...remappedNodes.map(n => (n.position?.y ?? 0) + (n.style?.height ?? LANE_HEIGHT))
+              )
+              cursor = diagramBottom + VERTICAL_GAP
+
+              mergedNodes = [...mergedNodes, ...remappedNodes]
+              mergedEdges = [...mergedEdges, ...remappedEdges]
+            })
+
+            const rewired = rewireCallbacks(mergedNodes, mergedEdges)
+            setNodes(rewired.nodes)
+            setEdges(rewired.edges)
+            setSelectedNodeId(null)
+            setSelectedEdgeId(null)
+            setTimeout(() => fitView({ padding: 0.15 }), 100)
+          })
+          .catch((err) => {
+            console.error('JSON import failed:', err)
+            alert(err.message || 'Could not read one or more files. Please choose valid diagram JSON files.')
+          })
+      }
 
   const selectedEdge = edges.find(e => e.id === selectedEdgeId)
 
@@ -976,15 +1369,80 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
           <button onClick={() => addNode('start')}    className="text-xs px-3 py-1.5 bg-white border border-green-200 rounded-lg text-green-700 hover:bg-green-50 transition-colors">+ Start</button>
           <button onClick={() => addNode('end')}      className="text-xs px-3 py-1.5 bg-white border border-orange-200 rounded-lg text-orange-700 hover:bg-orange-50 transition-colors">+ End</button>
           <button onClick={addLane}                   className="text-xs px-3 py-1.5 bg-white border border-[#b8dcf8] rounded-lg text-[#00528d] hover:bg-[#e8f4ff] transition-colors">+ Lane</button>
+          {(() => {
+            const selectedNode = nodes.find(n => n.id === selectedNodeId && n.type !== 'lane')
+            const hasFlag = selectedNode?.data?.flag
+            return (
+              <button
+                onClick={toggleBottleneck}
+                disabled={!selectedNode}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  hasFlag
+                    ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
+                    : 'bg-white border-red-200 text-red-600 hover:bg-red-50'
+                }`}
+                title={
+                  !selectedNode
+                    ? 'Select a shape first'
+                    : hasFlag
+                      ? 'Remove bottleneck from selected shape'
+                      : 'Mark selected shape as a bottleneck'
+                }
+              >
+                {hasFlag ? '✕ Remove bottleneck' : '⚠ Bottleneck'}
+              </button>
+            )
+          })()}
           <button onClick={() => fitView({ padding: 0.2 })} className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">⊡ Fit view</button>
         </div>
         <div className="flex gap-2">
+          {showJsonTools && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                multiple
+                className="hidden"
+                onChange={e => {
+                  const files = Array.from(e.target.files || [])
+                  if (files.length > 0) handleImportMultipleJSON(files)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs md:text-sm px-4 py-1.5 bg-white border border-[#b8dcf8] text-[#00528d] rounded-lg hover:bg-[#e8f4ff] transition-colors"
+                title="Load a diagram JSON to keep editing"
+              >
+                ↑ Import JSON
+              </button>
+            </>
+          )}
+          {(showJsonTools || showJsonExport) && (
+            <button
+              onClick={handleExportJSON}
+              className="text-xs md:text-sm px-4 py-1.5 bg-white border border-[#b8dcf8] text-[#00528d] rounded-lg hover:bg-[#e8f4ff] transition-colors"
+              title="Download as editable JSON"
+            >
+              ↓ Export JSON
+            </button>
+          )}
+          {(showJsonTools || showJsonExport) && (
+            <button
+              onClick={handleExportLucidCSV}
+              className="text-xs md:text-sm px-4 py-1.5 bg-white border border-[#b8dcf8] text-[#00528d] rounded-lg hover:bg-[#e8f4ff] transition-colors"
+              title="Download a CSV for Lucidchart (New ▸ Import ▸ Process diagram from CSV). Tip: lanes import vertically — select the pool in Lucid to switch to horizontal."
+            >
+              ↓ Lucid (CSV)
+            </button>
+          )}
           {!fullscreen && (
             <button onClick={openFullscreen} className="text-xs md:text-sm px-4 py-1.5 bg-white border border-[#b8dcf8] text-[#00528d] rounded-lg hover:bg-[#e8f4ff] transition-colors" title="Open in new tab for more space">
               ⛶ Open fullscreen
             </button>
           )}
-          <button onClick={handleExportPDF} disabled={exporting} className="text-xs md:text-sm px-4 py-1.5 bg-[#00528d] text-white rounded-lg hover:bg-[#003f6e] transition-colors disabled:opacity-50">
+          <button onClick={openPdfModal} disabled={exporting} className="text-xs md:text-sm px-4 py-1.5 bg-[#00528d] text-white rounded-lg hover:bg-[#003f6e] transition-colors disabled:opacity-50">
             {exporting ? 'Generating PDF…' : '↓ Export PDF'}
           </button>
         </div>
@@ -1030,7 +1488,7 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
             />
             Animated (dashed)
           </label>
-          {(selectedEdge.data?.bendX !== 0 || selectedEdge.data?.bendY !== 0) && (
+          {(selectedEdge?.data?.cp1x || selectedEdge?.data?.cp1y || selectedEdge?.data?.cp2x || selectedEdge?.data?.cp2y) && (
             <button
               onClick={() => edgeBendChanger(selectedEdgeId, 0, 0)}
               className="mt-2 text-[10px] text-[#00528d] hover:underline block"
@@ -1046,6 +1504,7 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
         ref={flowRef}
         style={{ width: '100%', height: fullscreen ? 'calc(100vh - 140px)' : '70vh' }}
         className="border border-[#d9efff] rounded-xl bg-white overflow-hidden"
+        onContextMenu={e => e.preventDefault()}
       >
         <ReactFlow
           nodes={displayedNodes}
@@ -1069,6 +1528,10 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
           elevateNodesOnSelect={false}
           elevateEdgesOnSelect
           nodeDragThreshold={8}
+          multiSelectionKeyCode="Shift"
+          selectionKeyCode="Shift"      
+          selectionOnDrag
+          panOnDrag={[1, 2]} 
         >
           <Background color="#e8f4ff" gap={20} />
           <Controls />
@@ -1078,9 +1541,49 @@ const SwimlaneDiagramInner = ({ diagram, sopTitle, fullscreen = false, initialSt
           />
         </ReactFlow>
       </div>
-    </div>
-  )
-}
+      {/* PDF Export Modal */}
+          {pdfModalOpen && (
+            <div 
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]" 
+              onMouseDown={(e) => {
+                // Only close if clicking directly on the backdrop, not on children
+                if (e.target === e.currentTarget) {
+                  setPdfModalOpen(false)
+                }
+              }}
+            >
+              <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
+                <h3 className="text-lg font-bold text-[#00528d] mb-4">Export to PDF</h3>
+                
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={pdfTitle}
+                  onChange={e => setPdfTitle(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4 outline-none focus:border-[#00528d]"
+                  placeholder="Process Swimlane Diagram"
+                />
+                
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setPdfModalOpen(false)}
+                    className="text-xs md:text-sm px-4 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleExportPDF}
+                    className="text-xs md:text-sm px-4 py-1.5 bg-[#00528d] text-white rounded-lg hover:bg-[#003f6e] transition-colors"
+                  >
+                    Export
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
 
 // ═══════════════════════════════════════
 //  FULLSCREEN VIEW
@@ -1113,6 +1616,7 @@ export const FullscreenDiagram = () => {
             diagram={null}
             sopTitle={state.sopTitle}
             fullscreen
+            showJsonExport
             initialState={{ nodes: state.nodes, edges: state.edges }}
           />
         </div>
@@ -1126,5 +1630,51 @@ const SwimlaneDiagram = (props) => (
     <SwimlaneDiagramInner {...props} />
   </ReactFlowProvider>
 )
+
+// ═══════════════════════════════════════
+//  BLANK BUILDER
+// ═══════════════════════════════════════
+const makeBlankState = () => ({
+  nodes: [
+    {
+      id: 'lane-1',
+      type: 'lane',
+      position: { x: 0, y: 0 },
+      data: { label: 'Lane 1', color: '#eaf3fb' },
+      style: { width: 900, height: LANE_HEIGHT, zIndex: 0 },
+      zIndex: 0,
+      draggable: false,
+      selectable: true,
+    },
+  ],
+  edges: [],
+})
+
+export const BlankBuilder = () => {
+  const initialState = useMemo(() => makeBlankState(), [])
+
+  return (
+    <ReactFlowProvider>
+      <div className="min-h-screen bg-[#d9efff] p-4">
+        <div className="bg-white rounded-2xl shadow-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-bold text-xl text-[#00528d]">Build a Process Diagram</h2>
+            <span className="text-xs text-[#5a8aaa]">
+              Changes are not saved — export to JSON before closing this tab.
+            </span>
+          </div>
+          <SwimlaneDiagramInner
+            diagram={null}
+            sopTitle="Process Diagram"
+            fullscreen
+            showJsonTools
+            initialState={initialState}
+          />
+        </div>
+      </div>
+      <Footer />
+    </ReactFlowProvider>
+  )
+}
 
 export default SwimlaneDiagram
