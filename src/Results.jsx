@@ -50,6 +50,17 @@ const StepIcon = ({ isDecision, isHandoff, bottleneck }) => {
   return <span title="Process">▶</span>
 }
 
+// Shown inside a tab when its data is still streaming from the backend.
+// The SOP tab lands first; this is the placeholder for diagram / bottlenecks
+// until those events arrive.
+const TabLoading = ({ label }) => (
+  <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+    <div className="w-12 h-12 rounded-full border-4 border-[#d9efff] border-t-[#00528d] animate-spin mb-4" />
+    <p className="text-sm md:text-base font-medium text-[#00528d]">{label}</p>
+    <p className="text-xs text-[#5a8aaa] mt-1">This usually finishes in a few seconds.</p>
+  </div>
+)
+
 const EditableField = ({ value, onChange, multiline = true, className = '', placeholder = '' }) => {
   const [editing, setEditing] = useState(false)
 
@@ -89,8 +100,9 @@ const EditableField = ({ value, onChange, multiline = true, className = '', plac
 }
 
 // ─── CHANGE 1: accept inputType + selectedIntents props with safe defaults ───
-const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['restructure', 'diagram', 'bottlenecks'] }) => {
-  const [activeTab, setActiveTab]       = useState('sop')
+const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['restructure', 'diagram', 'bottlenecks'], pendingTabs = new Set(), initialTab = null }) => {
+  // Land the user on whichever tab's data arrived first; fall back to 'sop'.
+  const [activeTab, setActiveTab]       = useState(initialTab || 'sop')
   const [copied, setCopied]             = useState(false)
   const [expandedStep, setExpandedStep] = useState(null)
   const [allExpanded, setAllExpanded]   = useState(false)
@@ -131,6 +143,7 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
     try {
       const sopData  = data?.sop
       const children = []
+
 
       children.push(new Paragraph({
         text: sopData?.title || 'Standard Operating Procedure',
@@ -192,18 +205,18 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
             children: [
               new TableCell({
                 children: [
-                  new Paragraph({ children: [new TextRun({ text: 'Start State', bold: true, color: '15803d' })], spacing: { after: 60 } }),
-                  new Paragraph({ text: sopData.start_state || '', spacing: { after: 0 } }),
+                  new Paragraph({ children: [new TextRun({ text: 'Start State', bold: true, color: '1e3a4f' })], spacing: { after: 60 } }),
+                  new Paragraph({ children: [new TextRun({ text: sopData.start_state || '', color: '2c4a5e' })], spacing: { after: 0 } }),
                 ],
-                shading: { type: ShadingType.SOLID, color: 'e8f9f0' },
+                shading: { type: ShadingType.SOLID, color: 'dde8ee' },
                 margins: { top: 100, bottom: 100, left: 150, right: 150 },
               }),
               new TableCell({
                 children: [
-                  new Paragraph({ children: [new TextRun({ text: 'End State', bold: true, color: 'c2410c' })], spacing: { after: 60 } }),
-                  new Paragraph({ text: sopData.end_state || '', spacing: { after: 0 } }),
+                  new Paragraph({ children: [new TextRun({ text: 'End State', bold: true, color: '4a1628' })], spacing: { after: 60 } }),
+                  new Paragraph({ children: [new TextRun({ text: sopData.end_state || '', color: '4a1628' })], spacing: { after: 0 } }),
                 ],
-                shading: { type: ShadingType.SOLID, color: 'fff4e8' },
+                shading: { type: ShadingType.SOLID, color: 'fdf0f4' },
                 margins: { top: 100, bottom: 100, left: 150, right: 150 },
               }),
             ],
@@ -225,13 +238,14 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
         const stepColor         = isDecision ? '7c3aed' : '00528d'
 
         children.push(new Paragraph({
+          heading: HeadingLevel.HEADING_3,
+          outlineLevel: 2,
           children: [
-            new TextRun({ text: `Step ${step.number}  `, bold: true, color: '00528d', size: 24 }),
-            new TextRun({ text: title, bold: true, color: stepColor, size: 24 }),
+            new TextRun({ text: `Step ${step.number}  `, bold: true, color: '00528d' }),
+            new TextRun({ text: title, bold: true, color: stepColor }),
             isDecision ? new TextRun({ text: '  [Decision]', color: '7c3aed', italics: true }) : new TextRun(''),
           ],
           spacing: { before: 200, after: 100 },
-          shading: { type: ShadingType.SOLID, color: 'f0f7ff' },
         }))
 
         if (action) {
@@ -263,19 +277,19 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
               children: [
                 happyPath ? new TableCell({
                   children: [
-                    new Paragraph({ children: [new TextRun({ text: `✓ ${isDecision ? 'Yes Path' : 'Happy Path'}`, bold: true, color: '15803d' })], spacing: { after: 60 } }),
-                    new Paragraph({ children: [new TextRun({ text: happyPath, color: '166534' })], spacing: { after: 0 } }),
+                    new Paragraph({ children: [new TextRun({ text: `✓ ${isDecision ? 'Yes Path' : 'Happy Path'}`, bold: true, color: '0d9488' })], spacing: { after: 60 } }),
+                    new Paragraph({ children: [new TextRun({ text: happyPath, color: '1c1917' })], spacing: { after: 0 } }),
                   ],
-                  shading: { type: ShadingType.SOLID, color: 'e8f9f0' },
+                  shading: { type: ShadingType.SOLID, color: 'ffffff' },
                   margins: { top: 80, bottom: 80, left: 120, right: 120 },
                 }) : new TableCell({ children: [new Paragraph({ text: '' })] }),
 
                 (unhappyPath && unhappyPath !== 'N/A') ? new TableCell({
                   children: [
-                    new Paragraph({ children: [new TextRun({ text: `✗ ${isDecision ? 'No Path' : 'Unhappy Path'}`, bold: true, color: 'b45309' })], spacing: { after: 60 } }),
-                    new Paragraph({ children: [new TextRun({ text: unhappyPath, color: '92400e' })], spacing: { after: 0 } }),
+                    new Paragraph({ children: [new TextRun({ text: `✗ ${isDecision ? 'No Path' : 'Unhappy Path'}`, bold: true, color: 'be123c' })], spacing: { after: 60 } }),
+                    new Paragraph({ children: [new TextRun({ text: unhappyPath, color: '1c1917' })], spacing: { after: 0 } }),
                   ],
-                  shading: { type: ShadingType.SOLID, color: 'fffbeb' },
+                  shading: { type: ShadingType.SOLID, color: 'ffffff' },
                   margins: { top: 80, bottom: 80, left: 120, right: 120 },
                 }) : new TableCell({ children: [new Paragraph({ text: '' })] }),
               ],
@@ -312,7 +326,7 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href     = url
-      a.download = 'sop-document.docx'
+      a.download = sopData.title.slice(-30)
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
@@ -322,7 +336,180 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
     setDocxLoading(false)
   }
 
-  const handleCopy = () => {
+  const handleDownloadBottlenecksPdf = () => {
+      import('jspdf').then(({ jsPDF }) => {
+        const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+        const pageWidth  = doc.internal.pageSize.getWidth()
+        const pageHeight = doc.internal.pageSize.getHeight()
+        const margin     = 40
+        const contentW   = pageWidth - margin * 2
+        let y            = margin
+
+        const checkPageBreak = (needed = 20) => {
+          if (y + needed > pageHeight - margin) { doc.addPage(); y = margin }
+        }
+
+        const drawText = (text, x, fontSize, color, bold = false, maxWidth = contentW) => {
+          const safeMaxWidth = maxWidth - (x - margin)
+          doc.setFontSize(fontSize)
+          doc.setTextColor(...color)
+          doc.setFont('helvetica', bold ? 'bold' : 'normal')
+          const lines = doc.splitTextToSize(String(text ?? ''), safeMaxWidth)
+          checkPageBreak(lines.length * (fontSize * 1.4))
+          doc.text(lines, x, y)
+          y += lines.length * (fontSize * 1.4)
+        }
+
+        const drawRect = (h, fillColor, strokeColor = null) => {
+          checkPageBreak(h)
+          doc.setFillColor(...fillColor)
+          if (strokeColor) { doc.setDrawColor(...strokeColor); doc.roundedRect(margin, y, contentW, h, 4, 4, 'FD') }
+          else              { doc.setDrawColor(...fillColor);  doc.roundedRect(margin, y, contentW, h, 4, 4, 'F')  }
+        }
+
+        const severityColors = {
+          High:   { bg: [254, 226, 226], text: [185, 28,  28],  dot: [239, 68,  68]  },
+          Medium: { bg: [255, 237, 213], text: [194, 65,  12],  dot: [249, 115, 22]  },
+          Low:    { bg: [254, 249, 195], text: [161, 98,  7],   dot: [234, 179, 8]   },
+        }
+
+        drawText('Bottleneck Analysis Report', margin, 20, [0, 82, 141], true)
+        y += 4
+        drawText(
+          `${data?.sop?.title || 'Process'} · ${bottlenecks.length} bottleneck${bottlenecks.length !== 1 ? 's' : ''} identified`,
+          margin, 10, [90, 138, 170]
+        )
+        y += 12
+
+        doc.setDrawColor(217, 239, 255)
+        doc.line(margin, y, pageWidth - margin, y)
+        y += 16
+
+        if (bottlenecks.length === 0) {
+          drawText('✓ No bottlenecks detected in this process.', margin, 12, [100, 150, 100])
+        }
+
+        const LH = (fs) => fs * 1.4
+
+        bottlenecks.forEach((b) => {
+          const severity = getSeverity(b)
+          const sc       = severityColors[severity.label] || severityColors.Low
+          const suggestions = b.suggestions || []
+
+          // ---- MEASURE (no drawing, no y mutation) ----
+          const innerW = contentW - 24   // 12pt padding each side
+
+          const titleLines = doc.splitTextToSize(`Step ${b.step_number} — ${b.step_title}`, innerW)
+          const descLines  = doc.splitTextToSize(b.description || '', innerW)
+          const sugBlocks  = suggestions.map(s =>
+            doc.splitTextToSize(s, contentW - 32 - margin + margin)  // matches indent below
+          )
+
+          // header: 18 top pad + title (15/line) + metrics row (30) + 16 bottom pad
+          const headerH = 18 + titleLines.length * 15 + 10 + 30 + 12
+
+          // body: section label (12) + desc (14/line) + gap (6)
+          //       + "SUGGESTIONS" label (12) + each suggestion (14/line + 4 gap)
+          let bodyH = 12 + descLines.length * 14 + 6
+          if (suggestions.length) {
+            bodyH += 12
+            bodyH += sugBlocks.reduce((acc, lines) => acc + lines.length * 14 + 4, 0)
+          }
+          bodyH += 16  // bottom pad
+
+          const cardH = headerH + bodyH
+
+          // ---- DECIDE PAGE BREAK ONCE, before any drawing ----
+          if (y + cardH + 12 > pageHeight - margin) {
+            doc.addPage()
+            y = margin
+          }
+
+          const cardTop = y
+
+          // ---- DRAW (pure positioning off cardTop, no checkPageBreak) ----
+          doc.setFillColor(255, 255, 255)
+          doc.setDrawColor(254, 202, 202)
+          doc.roundedRect(margin, cardTop, contentW, cardH, 6, 6, 'FD')
+
+          // header band
+          doc.setFillColor(255, 245, 245)
+          doc.roundedRect(margin, cardTop, contentW, headerH, 6, 6, 'F')
+          doc.rect(margin, cardTop + headerH - 6, contentW, 6, 'F') // square bottom corners
+          doc.setDrawColor(254, 202, 202)
+          doc.line(margin, cardTop + headerH, margin + contentW, cardTop + headerH)
+
+          // severity badge
+          doc.setFillColor(...sc.bg)
+          doc.roundedRect(pageWidth - margin - 70, cardTop + 10, 66, 18, 9, 9, 'F')
+          doc.setFontSize(9); doc.setTextColor(...sc.text); doc.setFont('helvetica', 'bold')
+          doc.text(severity.label, pageWidth - margin - 37, cardTop + 22, { align: 'center' })
+
+          // type + title (drawn directly, no drawText)
+          doc.setFontSize(8); doc.setTextColor(239, 68, 68); doc.setFont('helvetica', 'bold')
+          doc.text(b.type || 'Bottleneck', margin + 12, cardTop + 16)
+
+          doc.setFontSize(11); doc.setTextColor(185, 28, 28); doc.setFont('helvetica', 'bold')
+          doc.text(titleLines, margin + 12, cardTop + 30)
+
+          // metrics row — anchored below the (possibly multi-line) title
+          const metricsY = cardTop + 18 + titleLines.length * 15 + 10
+          const metrics = [
+            ...(inputType === 'transcript' ? [{ label: 'Mentions', val: b.metrics?.transcript_mentions ?? '—' }] : []),
+            { label: 'Rework Rate',   val: b.metrics?.rework_rate  ?? '—' },
+            { label: 'Times Delayed', val: b.metrics?.times_delayed ?? '—' },
+          ]
+          metrics.forEach((m, mi) => {
+            const mx = margin + 14 + mi * 90
+            doc.setFontSize(14); doc.setTextColor(220, 38, 38); doc.setFont('helvetica', 'bold')
+            doc.text(String(m.val), mx, metricsY + 8)
+            doc.setFontSize(8); doc.setTextColor(239, 68, 68); doc.setFont('helvetica', 'normal')
+            doc.text(m.label, mx, metricsY + 20)
+          })
+
+          // body
+          let by = cardTop + headerH + 14
+          doc.setFontSize(8); doc.setTextColor(120, 120, 120); doc.setFont('helvetica', 'bold')
+          doc.text("WHY IT'S A BOTTLENECK", margin + 12, by)
+          by += 12
+          doc.setFontSize(10); doc.setTextColor(80, 80, 80); doc.setFont('helvetica', 'normal')
+          doc.text(descLines, margin + 12, by)
+          by += descLines.length * 14 + 6
+
+          if (suggestions.length) {
+            doc.setFontSize(8); doc.setTextColor(120, 120, 120); doc.setFont('helvetica', 'bold')
+            doc.text('SUGGESTIONS', margin + 12, by)
+            by += 12
+            suggestions.forEach((s, si) => {
+              doc.setFillColor(232, 244, 255)
+              doc.circle(margin + 20, by - 3, 7, 'F')
+              doc.setFontSize(7); doc.setTextColor(0, 82, 141); doc.setFont('helvetica', 'bold')
+              doc.text(String(si + 1), margin + 20, by, { align: 'center' })
+
+              doc.setFontSize(10); doc.setTextColor(80, 80, 80); doc.setFont('helvetica', 'normal')
+              doc.text(sugBlocks[si], margin + 32, by)
+              by += sugBlocks[si].length * 14 + 4
+            })
+          }
+
+          y = cardTop + cardH + 15
+        })
+
+        const totalPages = doc.internal.getNumberOfPages()
+        for (let p = 1; p <= totalPages; p++) {
+          doc.setPage(p)
+          doc.setFontSize(8); doc.setTextColor(160, 160, 160); doc.setFont('helvetica', 'normal')
+          doc.text(`Generated by Process Analyzer · Page ${p} of ${totalPages}`, pageWidth / 2, pageHeight - 20, { align: 'center' })
+        }
+
+        doc.save(`bottleneck-analysis${data?.sop?.title ? '-' + data.sop.title.slice(0, 30) : ''}.pdf`)
+      }).catch(err => {
+        console.error('PDF generation failed:', err)
+        alert('Could not generate PDF — please ensure jsPDF is installed.')
+      })
+    }
+
+  {/* const handleCopy = () => {
     if (activeTab !== 'sop') {
       const content = document.getElementById('active-content')
       navigator.clipboard.writeText(content.innerText)
@@ -420,7 +607,7 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
       navigator.clipboard.writeText(document.getElementById('active-content').innerText)
       setCopied(true); setTimeout(() => setCopied(false), 2000)
     }
-  }
+  } */}
 
   const handleDownloadCSV = () => {
     const csvContent = data?.lucid?.csv || data?.csv || ''
@@ -467,13 +654,21 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
 
         {/* ─── CHANGE 2 continued: render only visible tabs ─── */}
         <div className="flex border-b-2 border-[#d9efff] px-5 md:px-8">
-          {visibleTabs.map(tab => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              className={`px-4 md:px-6 py-3 text-sm md:text-base font-medium border-b-2 transition-all
-                ${activeTab === tab.key ? 'text-[#00528d] border-[#00528d]' : 'text-[#5a8aaa] border-transparent'}`}>
-              {tab.label}
-            </button>
-          ))}
+          {visibleTabs.map(tab => {
+            const isPending = pendingTabs.has(
+              tab.key === 'lucid' ? 'diagram' : tab.key
+            )
+            return (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className={`px-4 md:px-6 py-3 text-sm md:text-base font-medium border-b-2 transition-all flex items-center gap-2
+                  ${activeTab === tab.key ? 'text-[#00528d] border-[#00528d]' : 'text-[#5a8aaa] border-transparent'}`}>
+                {tab.label}
+                {isPending && (
+                  <span className="inline-block w-3 h-3 rounded-full border-2 border-[#d9efff] border-t-[#00528d] animate-spin" />
+                )}
+              </button>
+            )
+          })}
         </div>
 
         {/* Toolbar */}
@@ -490,13 +685,18 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
                 {allExpanded ? 'Collapse All ▲' : 'Expand All ▼'}
               </button>
             )}
-            <button onClick={handleDownloadDocx} disabled={docxLoading}
-              className="text-xs md:text-sm text-[#00528d] font-medium border border-[#b8dcf8] px-3 py-1 rounded-lg hover:bg-[#e8f4ff] transition-colors disabled:opacity-50">
-              {docxLoading ? 'Generating…' : '↓ Word'}
+            {activeTab === 'sop' && (
+              <button onClick={handleDownloadDocx} disabled={docxLoading}
+                className="text-xs md:text-sm text-[#00528d] font-medium border border-[#b8dcf8] px-3 py-1 rounded-lg hover:bg-[#e8f4ff] transition-colors disabled:opacity-50">
+                {docxLoading ? 'Generating…' : '↓ Word - SOP'}
+              </button>
+            )}
+            {activeTab === 'bottlenecks' && (
+            <button onClick={handleDownloadBottlenecksPdf}
+              className="text-xs md:text-sm text-[#00528d] font-medium border border-[#b8dcf8] px-3 py-1 rounded-lg hover:bg-[#e8f4ff] transition-colors">
+                ↓ PDF - Bottleneck
             </button>
-            <button onClick={handleCopy} className="text-sm md:text-base text-[#00528d] font-medium">
-              {copied ? '✓ Copied!' : 'Copy'}
-            </button>
+            )}
           </div>
         </div>
 
@@ -592,15 +792,15 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
               {(data?.sop?.start_state || data?.sop?.end_state) && (
                 <div className="flex gap-3 mb-5">
                   {data.sop.start_state && (
-                    <div className="flex-1 p-3 md:p-4 bg-[#e8f9f0] rounded-xl border border-[#b8edd0]">
-                      <p className="text-xs md:text-sm font-semibold text-green-700 mb-0.5">Start State</p>
-                      <p className="text-xs md:text-sm text-green-800">{data.sop.start_state}</p>
+                    <div className="flex-1 p-3 md:p-4 bg-[#e8f0f5] rounded-xl border border-[#ccdae3]">
+                      <p className="text-xs md:text-sm font-semibold text-[#1e3a4f] mb-0.5">Start State</p>
+                      <p className="text-xs md:text-sm text-[#2c4a5e]">{data.sop.start_state}</p>
                     </div>
                   )}
                   {data.sop.end_state && (
-                    <div className="flex-1 p-3 md:p-4 bg-[#fff4e8] rounded-xl border border-[#fdd9a8]">
-                      <p className="text-xs md:text-sm font-semibold text-orange-700 mb-0.5">End State</p>
-                      <p className="text-xs md:text-sm text-orange-800">{data.sop.end_state}</p>
+                    <div className="flex-1 p-3 md:p-4 bg-[#fdf0f4] rounded-xl border border-[#d99aaf]">
+                      <p className="text-xs md:text-sm font-semibold text-[#4a1628] mb-0.5">End State</p>
+                      <p className="text-xs md:text-sm text-[#4a1628]">{data.sop.end_state}</p>
                     </div>
                   )}
                 </div>
@@ -655,7 +855,7 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
                             {bottleneck  && <span className="text-xs px-2 py-0.5 bg-red-100 text-red-600 rounded-full font-medium">⚠ Bottleneck</span>}
-                            {isDecision  && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-600 rounded-full">Decision</span>}
+                            {isDecision  && <span className="text-xs px-2 py-0.5 bg-[#faf5ff] text-[#7c3aed] rounded-full font-semibold border border-[#e9d5ff]">Decision</span>}
                             <span className={`text-[#5a8aaa] text-xs transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}>▼</span>
                           </div>
                         </div>
@@ -695,28 +895,32 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
 
                           {/* Happy / Unhappy paths */}
                           <div className="flex gap-2">
-                            {step.happy_path && (
-                              <div className="flex-1 p-3 bg-[#e8f9f0] rounded-lg border border-[#b8edd0]">
-                                <p className="text-xs font-semibold text-green-700 mb-1">✓ {isDecision ? 'Yes Path' : 'Happy Path'}</p>
-                                <EditableField
-                                  value={happyPath}
-                                  onChange={v => handleEdit(index, 'happy_path', v)}
-                                  className="text-xs md:text-sm text-green-800"
-                                  placeholder="Happy path description..."
-                                />
-                              </div>
-                            )}
-                            {step.unhappy_path && step.unhappy_path !== 'N/A' && (
-                              <div className="flex-1 p-3 bg-[#fffbeb] rounded-lg border border-[#fde68a]">
-                                <p className="text-xs font-semibold text-amber-700 mb-1">✗ {isDecision ? 'No Path' : 'Unhappy Path'}</p>
-                                <EditableField
-                                  value={unhappyPath}
-                                  onChange={v => handleEdit(index, 'unhappy_path', v)}
-                                  className="text-xs md:text-sm text-amber-700"
-                                  placeholder="Unhappy path description..."
-                                />
-                              </div>
-                            )}
+                              {step.happy_path && (
+                                <div className="flex-1 p-3 bg-[#ffffff] rounded-lg border border-[#e2e8f0]">
+                                  <span className="inline-block bg-[#0d9488] text-white text-[10px] font-bold px-3 py-0.5 rounded-full mb-2">
+                                    ✓ {isDecision ? 'Yes Path' : 'Happy Path'}
+                                  </span>
+                                  <EditableField
+                                    value={happyPath}
+                                    onChange={v => handleEdit(index, 'happy_path', v)}
+                                    className="text-xs md:text-sm text-[#1c1917]"
+                                    placeholder="Happy path description..."
+                                  />
+                                </div>
+                              )}
+                              {step.unhappy_path && step.unhappy_path !== 'N/A' && (
+                                <div className="flex-1 p-3 bg-[#ffffff] rounded-lg border border-[#e2e8f0]">
+                                  <span className="inline-block bg-[#be123c] text-white text-[10px] font-bold px-3 py-0.5 rounded-full mb-2">
+                                    ✗ {isDecision ? 'No Path' : 'Unhappy Path'}
+                                  </span>
+                                  <EditableField
+                                    value={unhappyPath}
+                                    onChange={v => handleEdit(index, 'unhappy_path', v)}
+                                    className="text-xs md:text-sm text-[#1c1917]"
+                                    placeholder="Unhappy path description..."
+                                  />
+                                </div>
+                              )}
                           </div>
 
                           {/* Handoff */}
@@ -737,10 +941,10 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
 
                           {/* Bottleneck callout */}
                           {bottleneck && (
-                            <div className="p-3 bg-red-50 rounded-lg border border-red-200">
-                              <p className="text-xs font-semibold text-red-600 mb-1">⚠ Bottleneck Detected</p>
-                              <p className="text-xs md:text-sm text-red-700 mb-2">{bottleneck.description}</p>
-                              <div className="flex gap-3 text-xs text-red-500 mb-2">
+                            <div className="p-3 bg-[#fdf8f8] rounded-lg border border-[#fecdd3] border-l-4 border-l-[#be123c]">
+                              <p className="text-xs font-semibold text-[#be123c] mb-1">⚠ Bottleneck Detected</p>
+                              <p className="text-xs md:text-sm text-[#1c1917] mb-2">{bottleneck.description}</p>
+                              <div className="flex gap-3 text-xs text-[#be123c] mb-2">
                                 {inputType === 'transcript' && (
                                   <span>Mentions: <strong>{bottleneck.metrics?.transcript_mentions}</strong></span>
                                 )}
@@ -748,7 +952,7 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
                               </div>
                               <ul className="space-y-1">
                                 {bottleneck.suggestions?.map((s, i) => (
-                                  <li key={i} className="text-xs md:text-sm text-red-700 flex gap-1"><span>→</span><span>{s}</span></li>
+                                  <li key={i} className="text-xs md:text-sm text-[#1c1917] flex gap-1"><span>→</span><span>{s}</span></li>
                                 ))}
                               </ul>
                             </div>
@@ -770,7 +974,11 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
             <p className="text-sm md:text-base text-gray-500 mb-4">
               Drag nodes, click to edit, draw connections between handles, and export as PDF.
             </p>
-            <SwimlaneDiagram diagram={data?.diagram} sopTitle={data?.sop?.title} />
+            {pendingTabs.has('diagram') ? (
+              <TabLoading label="Building the process diagram…" />
+            ) : (
+              <SwimlaneDiagram diagram={data?.diagram} sopTitle={data?.sop?.title} showJsonExport />
+            )}
           </div>
         )}
 
@@ -778,62 +986,73 @@ const Results = ({ data, onBack, inputType = 'transcript', selectedIntents = ['r
         {activeTab === 'bottlenecks' && (
           <div id="active-content" className="p-6 md:p-8 max-h-[600px] md:max-h-[700px] lg:max-h-[75vh] overflow-y-auto">
             <h2 className="font-bold text-lg md:text-xl text-[#00528d] mb-1">Bottleneck Analysis</h2>
-            <p className="text-sm md:text-base text-gray-500 mb-4">
-              {bottlenecks.length === 0
-                ? 'No bottlenecks detected in this process.'
-                : `${bottlenecks.length} bottleneck${bottlenecks.length > 1 ? 's' : ''} identified across the workflow.`}
-            </p>
-            {bottlenecks.length === 0 && (
-              <div className="p-6 text-center text-gray-400 border border-dashed border-gray-200 rounded-xl">✓ This process looks clean — no bottlenecks found.</div>
-            )}
-            <div className="space-y-4 lg:grid lg:grid-cols-2 lg:gap-5 lg:space-y-0">
-              {bottlenecks.map((b, i) => {
-                const severity = getSeverity(b)
-                return (
-                  <div key={i} className="border border-red-200 rounded-xl overflow-hidden h-fit">
-                    <div className="p-4 md:p-5 bg-red-50">
-                      <div className="flex justify-between items-start mb-1">
-                        <div>
-                          <span className="text-xs md:text-sm font-semibold text-red-500 uppercase tracking-wide">{b.type}</span>
-                          <p className="text-sm md:text-base font-bold text-red-700 mt-0.5">Step {b.step_number} — {b.step_title}</p>
-                        </div>
-                        <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${severity.bg} ${severity.text}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${severity.dot}`} />{severity.label}
-                        </span>
-                      </div>
-                      <div className="flex gap-4 md:gap-6 mt-2">
-                        {/* Hide transcript_mentions for SOP-sourced bottlenecks since it's always 0 */}
-                        {inputType === 'transcript' && (
-                          <div className="text-center">
-                            <p className="text-lg md:text-xl font-bold text-red-600">{b.metrics?.transcript_mentions ?? '—'}</p>
-                            <p className="text-xs text-red-400">Mentions</p>
+            {pendingTabs.has('bottlenecks') ? (
+              <TabLoading label="Scanning for bottlenecks…" />
+            ) : (
+              <>
+                <p className="text-sm md:text-base text-gray-500 mb-4">
+                  {bottlenecks.length === 0
+                    ? 'No bottlenecks detected in this process.'
+                    : `${bottlenecks.length} bottleneck${bottlenecks.length > 1 ? 's' : ''} identified across the workflow.`}
+                </p>
+                {bottlenecks.length === 0 && (
+                  <div className="p-6 text-center text-gray-400 border border-dashed border-gray-200 rounded-xl">✓ This process looks clean — no bottlenecks found.</div>
+                )}
+                <div className="space-y-4 lg:grid lg:grid-cols-2 lg:gap-5 lg:space-y-0">
+                  {bottlenecks.map((b, i) => {
+                    const severity = getSeverity(b)
+                    return (
+                      <div key={i} className="border border-[#e2e8f0] rounded-xl overflow-hidden h-fit">
+                        <div className="p-4 md:p-5 bg-[#be123c]">
+                          <div className="flex justify-between items-start mb-1">
+                            <div>
+                              <span className="text-xs md:text-sm font-semibold text-white uppercase tracking-wide">{b.type}</span>
+                              <p className="text-sm md:text-base font-bold text-white mt-0.5">Step {b.step_number} — {b.step_title}</p>
+                            </div>
+                            <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${severity.bg} ${severity.text}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${severity.dot}`} />{severity.label}
+                            </span>
                           </div>
-                        )}
-                        <div className="text-center"><p className="text-lg md:text-xl font-bold text-red-600">{b.metrics?.rework_rate ?? '—'}</p><p className="text-xs text-red-400">Rework Rate</p></div>
-                        <div className="text-center"><p className="text-lg md:text-xl font-bold text-red-600">{b.metrics?.times_delayed ?? '—'}</p><p className="text-xs text-red-400">Times Delayed</p></div>
+                          <div className="flex gap-4 md:gap-6 mt-2">
+                            {inputType === 'transcript' && (
+                              <div className="text-center">
+                                <p className="text-lg md:text-xl font-bold text-white">{b.metrics?.transcript_mentions ?? '—'}</p>
+                                <p className="text-xs text-[#fecdd3]">Mentions</p>
+                              </div>
+                            )}
+                            <div className="text-center">
+                              <p className="text-lg md:text-xl font-bold text-white">{b.metrics?.rework_rate ?? '—'}</p>
+                              <p className="text-xs text-[#fecdd3]">Rework Rate</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-lg md:text-xl font-bold text-white">{b.metrics?.times_delayed ?? '—'}</p>
+                              <p className="text-xs text-[#fecdd3]">Times Delayed</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-4 md:p-5 space-y-3 bg-white">
+                          <div>
+                            <p className="text-xs md:text-sm font-semibold text-[#be123c] uppercase tracking-wide mb-1">Why it's a bottleneck</p>
+                            <p className="text-sm md:text-base text-[#44403c]">{b.description}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs md:text-sm font-semibold text-[#be123c] uppercase tracking-wide mb-2">Suggestions</p>
+                            <ul className="space-y-2">
+                              {b.suggestions?.map((s, si) => (
+                                <li key={si} className="flex gap-2 text-sm md:text-base text-[#44403c]">
+                                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#fff1f2] text-[#be123c] text-xs flex items-center justify-center font-bold">{si + 1}</span>
+                                  {s}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="p-4 md:p-5 space-y-3 bg-white">
-                      <div>
-                        <p className="text-xs md:text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Why it's a bottleneck</p>
-                        <p className="text-sm md:text-base text-gray-600">{b.description}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs md:text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Suggestions</p>
-                        <ul className="space-y-2">
-                          {b.suggestions?.map((s, si) => (
-                            <li key={si} className="flex gap-2 text-sm md:text-base text-gray-600">
-                              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#e8f4ff] text-[#00528d] text-xs flex items-center justify-center font-bold">{si + 1}</span>
-                              {s}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 
